@@ -64,9 +64,9 @@ El código usa `atoi()`, que es una función obsoleta porque:
 
 Usar funciones obsoletas introduce riesgos de seguridad y errores difíciles de detectar. Se debe usar `strtol()` que permite verificar errores de conversión.
 
-## 3. Solución propuesta
+### Solución propuesta
 
-La solución corregida (`answer.c`) aplica todas las correcciones necesarias:
+Aunque no lo pide explicitamente el enucniado se ha corregido el código aplicando todas las correcciones necesarias:
 - **DCL00-C**: El parámetro de `factorial()` se declara como `const`
 - **DCL01-C**: No se reutilizan nombres de variables entre ámbitos
 - **DCL02-C**: Se usan nombres descriptivos (`default_value`, `max_iterations`, `iteration`, `number`)
@@ -77,7 +77,7 @@ La solución corregida (`answer.c`) aplica todas las correcciones necesarias:
 
 **Código corregido disponible en:** `answer.c`
 
-## 4. Instala la herramienta perf para realizar el profiling de la aplicación
+## 3. Instala la herramienta perf para realizar el profiling de la aplicación
 
 Para instalar `perf` en sistemas Linux:
 
@@ -92,74 +92,73 @@ En algunos sistemas, puede ser necesario instalar la versión específica del ke
 sudo apt install linux-tools-$(uname -r)
 ```
 
-### Compilación para profiling
-
 Para usar `perf` correctamente, compilar con símbolos de depuración y sin optimizaciones:
 
 ```bash
 gcc -g -O0 -o factorial_original original.c
-gcc -g -O0 -o factorial_corrected answer.c
 ```
 
-### Ejecutar profiling con perf
+## 4. El programa permite mostrar el código desensamblado de la aplicación
+
+Para ver el código desensamblado, primero ejecutamos el programa con `perf record` y luego usamos `perf annotate` para ver el ensamblador:
 
 ```bash
-# Ejecutar el programa con perf
-perf record ./factorial_original 20
+# Paso 1: Grabar el profiling
+perf record ./factorial_original 60
 
-# Ver el reporte
-perf report
+# Paso 2: Ver el reporte general
+perf report --stdio --header
 
-# Ver estadísticas
-perf stat ./factorial_original 20
-```
-
-## 5. El programa permite mostrar el código desensamblado de la aplicación
-
-Para ver el código desensamblado:
-
-```bash
-# Opción 1: Ver desensamblado con perf
+# Paso 3: Ver el código desensamblado
 perf annotate
-
-# Opción 2: Ver desensamblado con objdump
-objdump -d factorial_original > original_disassembly.txt
-
-# Opción 3: Ver desensamblado con gdb
-gdb factorial_original
-(gdb) disassemble main
-(gdb) disassemble factorial
 ```
 
-**Captura/Resultado:**
+**Ejecución del programa:**
+
+![Ejecución con perf record](others/1.png)
+
+**Reporte de profiling:**
+
+![Reporte perf](others/2.png)
+
+Como se puede observar en el reporte:
+- Se capturaron aproximadamente 500,000 eventos
+- El 50.00% del overhead corresponde a la función `factorial` 
+- El otro 50.00% corresponde a operaciones del sistema (`ld-linux-x86-64.so.2`)
+
+**Código desensamblado:**
+
+![Desensamblado perf annotate](others/3.png)
+
+El desensamblado muestra la función `factorial` completa en lenguaje ensamblador x86-64, donde se puede ver:
+- La gestión del stack frame (`push %rbp`, `mov %rsp,%rbp`)
+- La condición de parada (`cmpl $0x1,-0x14(%rbp)`)
+- La llamada recursiva (`call factorial`)
+- La multiplicación del resultado (`imul %rbx,%rax`)
+
+## 5. ¿Podrías decir cuál es la instrucción que más tiempo de CPU requiere?
+
+Según el análisis con `perf annotate`, la instrucción que más tiempo de CPU requiere es `imul   %rbx,%rax`:
+
+```assembly
+1d:    mov    -0x14(%rbp),%ebx    # Cargar el valor de i
+       mov    -0x14(%rbp),%eax    # Cargar i de nuevo
+       sub    $0x1,%eax            # Restar 1 (para i-1)
+       mov    %eax,%edi            # Preparar argumento
+       → call factorial            # Llamada recursiva
+100.00 imul   %rbx,%rax           # Multiplicar i * factorial(i-1) ← CRÍTICO
 ```
-[Ejecutar el comando y pegar aquí la salida del desensamblado]
-```
 
-## 6. ¿Podrías decir cuál es la instrucción que más tiempo de CPU requiere?
+Esta instrucción muestra un **100.00%** del tiempo de CPU en el perfil, como se puede ver en la captura del apartado 4. Esta instrucción es la más costosa porque:
 
-La instrucción que más tiempo de CPU requiere típicamente será la **llamada recursiva** en la función `factorial()`.
+1. **Operación de multiplicación**: La instrucción `imul` (Integer Multiplication) realiza la multiplicación de dos registros de 64 bits (`%rbx` y `%rax`), que es una operación aritmética costosa en términos de ciclos de CPU.
 
-**Razón**: 
-- La recursividad genera múltiples llamadas a función, cada una con su overhead (push/pop de stack, gestión de registros, etc.)
-- Para calcular `factorial(n)`, se realizan `n` llamadas recursivas
-- Cada llamada tiene un costo en términos de ciclos de CPU para gestionar el stack frame
+2. **Se ejecuta en cada iteración recursiva**: Esta multiplicación se realiza en cada llamada recursiva de la función `factorial()`, implementando la operación `i * factorial(i - 1)`.
 
-**Instrucciones críticas:**
-1. `call factorial` - La llamada recursiva misma
-2. `imul` o `mul` - La multiplicación del resultado
-3. Operaciones de gestión del stack (`push`, `pop`, ajustes del stack pointer)
+3. **Números grandes**: Al calcular factoriales de números como 60, las multiplicaciones involucran números extremadamente grandes (hasta 64 bits), lo que hace que la operación sea más intensiva.
 
-Para confirmar con perf:
 
-```bash
-perf record -g ./factorial_original 20
-perf report --stdio
-```
-
-**Captura/Resultado:**
-```
-[Ejecutar el comando y pegar aquí la salida de perf report mostrando las funciones más costosas]
-```
-
-**Optimización posible**: Una versión iterativa del factorial sería más eficiente en términos de CPU, evitando el overhead de las llamadas recursivas.
+Hacer una versión iterativa del factorial sería más eficiente porque:
+- Evita el overhead de múltiples llamadas recursivas y gestión del stack
+- Mantiene las mismas operaciones de multiplicación pero con menos overhead general
+- Reduce el uso de memoria del stack
