@@ -1,10 +1,7 @@
 # Prácticas de Diseño y Programación Seguras
 
-## Descripción
-
 Ejercicios prácticos de análisis y evaluación de código seguro en C, Java y Python, basados en los estándares SEI CERT. Cada ejercicio incluye código problemático, solución corregida y documentación detallada.
 
-## Estructura
 
 ```
 Prácticas/
